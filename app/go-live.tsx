@@ -49,6 +49,8 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const STREAMING_ACCOUNT_KEY = 'uservault_streaming_account_created';
 const STREAMING_TOKEN_KEY = 'uservault_streaming_token';
+const STREAMING_EMAIL_KEY = 'uservault_streaming_email';
+const STREAMING_PASSWORD_KEY = 'uservault_streaming_password';
 
 type StreamMode = 'select' | 'irl' | 'screen';
 
@@ -329,17 +331,28 @@ export default function GoLiveScreen() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', username: 'System', message: 'Welcome to the stream!', timestamp: new Date() },
   ]);
+  const [streamingEmail, setStreamingEmail] = useState<string | null>(null);
+  const [streamingPassword, setStreamingPassword] = useState<string | null>(null);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
 
   useEffect(() => {
     const checkStreamingAccount = async () => {
       try {
-        const [accountCreated, storedToken] = await Promise.all([
+        const [accountCreated, storedToken, storedEmail, storedPassword] = await Promise.all([
           AsyncStorage.getItem(STREAMING_ACCOUNT_KEY),
           AsyncStorage.getItem(STREAMING_TOKEN_KEY),
+          AsyncStorage.getItem(STREAMING_EMAIL_KEY),
+          AsyncStorage.getItem(STREAMING_PASSWORD_KEY),
         ]);
         setHasStreamingAccount(accountCreated === 'true');
         if (storedToken) {
           setStreamingToken(storedToken);
+        }
+        if (storedEmail) {
+          setStreamingEmail(storedEmail);
+        }
+        if (storedPassword) {
+          setStreamingPassword(storedPassword);
         }
         console.log('[GoLive] Streaming account status:', accountCreated, 'token:', !!storedToken);
       } catch (error) {
@@ -370,7 +383,7 @@ export default function GoLiveScreen() {
         avatar_url: currentUser.avatar,
       });
       
-      return response;
+      return { ...response, generatedEmail: email, generatedPassword: password };
     },
     onSuccess: async (data) => {
       console.log('[GoLive] Streaming account created successfully');
@@ -379,10 +392,19 @@ export default function GoLiveScreen() {
         await AsyncStorage.setItem(STREAMING_TOKEN_KEY, data.access_token);
         setStreamingToken(data.access_token);
       }
+      if (data.generatedEmail) {
+        await AsyncStorage.setItem(STREAMING_EMAIL_KEY, data.generatedEmail);
+        setStreamingEmail(data.generatedEmail);
+      }
+      if (data.generatedPassword) {
+        await AsyncStorage.setItem(STREAMING_PASSWORD_KEY, data.generatedPassword);
+        setStreamingPassword(data.generatedPassword);
+      }
       setHasStreamingAccount(true);
       setIsCreatingAccount(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       queryClient.invalidateQueries({ queryKey: ['mobile-stream-config'] });
+      setShowCredentialsModal(true);
     },
     onError: (error) => {
       console.error('[GoLive] Failed to create streaming account:', error);
@@ -549,6 +571,62 @@ export default function GoLiveScreen() {
         </View>
       </Modal>
 
+      <Modal visible={showCredentialsModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.credentialsModalContent}>
+            <View style={styles.modalIconContainer}>
+              <Check color={colors.dark.success} size={48} />
+            </View>
+            <Text style={styles.modalTitle}>Account Created!</Text>
+            <Text style={styles.modalText}>
+              Your streaming account has been created. Save these credentials to login on the website:
+            </Text>
+            
+            <View style={styles.credentialsBox}>
+              <View style={styles.credentialsBoxItem}>
+                <Text style={styles.credentialLabelSmall}>Email</Text>
+                <View style={styles.credentialValueRow}>
+                  <Text style={styles.credentialValueSmall} selectable>{streamingEmail}</Text>
+                  <TouchableOpacity onPress={() => handleCopy(streamingEmail || '', 'rtmp')}>
+                    {copied === 'rtmp' ? (
+                      <Check color={colors.dark.success} size={16} />
+                    ) : (
+                      <Copy color={colors.dark.accent} size={16} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.credentialsBoxItem}>
+                <Text style={styles.credentialLabelSmall}>Password</Text>
+                <View style={styles.credentialValueRow}>
+                  <Text style={styles.credentialValueSmall} selectable>{streamingPassword}</Text>
+                  <TouchableOpacity onPress={() => handleCopy(streamingPassword || '', 'key')}>
+                    {copied === 'key' ? (
+                      <Check color={colors.dark.success} size={16} />
+                    ) : (
+                      <Copy color={colors.dark.accent} size={16} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.credentialsBoxItem}>
+                <Text style={styles.credentialLabelSmall}>Website</Text>
+                <Text style={styles.credentialValueSmall} selectable>stream.uservault.de</Text>
+              </View>
+            </View>
+            
+            <TouchableOpacity
+              style={styles.credentialsCloseButton}
+              onPress={() => setShowCredentialsModal(false)}
+            >
+              <Text style={styles.credentialsCloseText}>Got it!</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showSetupModal && !isLive} transparent animationType="slide">
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -566,14 +644,16 @@ export default function GoLiveScreen() {
             </View>
 
             <ScrollView style={styles.setupModalScroll} showsVerticalScrollIndicator={false}>
-              {streamMode === 'screen' && (
+              {(streamMode === 'screen' || streamMode === 'irl') && (
                 <View style={styles.rtmpInfoCard}>
                   <View style={styles.rtmpInfoHeader}>
-                    <Monitor color={colors.dark.accent} size={20} />
+                    {streamMode === 'irl' ? <Camera color={colors.dark.accent} size={20} /> : <Monitor color={colors.dark.accent} size={20} />}
                     <Text style={styles.rtmpInfoTitle}>Streaming Credentials</Text>
                   </View>
                   <Text style={styles.rtmpInfoText}>
-                    Use these credentials in your streaming software (OBS, Larix Broadcaster, etc.)
+                    {streamMode === 'irl' 
+                      ? 'Use Larix Broadcaster or similar app on your device to stream with camera:'
+                      : 'Use these credentials in your streaming software (OBS, Larix Broadcaster, etc.):'}
                   </Text>
                   
                   <View style={styles.credentialItem}>
@@ -741,7 +821,35 @@ export default function GoLiveScreen() {
       />
 
       {streamMode === 'select' && (
-        <StreamTypeSelector onSelect={handleSelectMode} />
+        <>
+          <StreamTypeSelector onSelect={handleSelectMode} />
+          {hasStreamingAccount && streamingEmail && (
+            <View style={styles.savedCredentialsCard}>
+              <View style={styles.savedCredentialsHeader}>
+                <Settings color={colors.dark.accent} size={18} />
+                <Text style={styles.savedCredentialsTitle}>Website Login</Text>
+              </View>
+              <View style={styles.savedCredentialItem}>
+                <Text style={styles.savedCredentialLabel}>Email:</Text>
+                <Text style={styles.savedCredentialValue} selectable>{streamingEmail}</Text>
+                <TouchableOpacity onPress={() => handleCopy(streamingEmail, 'rtmp')}>
+                  {copied === 'rtmp' ? <Check color={colors.dark.success} size={14} /> : <Copy color={colors.dark.textSecondary} size={14} />}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.savedCredentialItem}>
+                <Text style={styles.savedCredentialLabel}>Password:</Text>
+                <Text style={styles.savedCredentialValue} selectable>{showStreamKey ? streamingPassword : '••••••••'}</Text>
+                <TouchableOpacity onPress={() => setShowStreamKey(!showStreamKey)}>
+                  {showStreamKey ? <EyeOff color={colors.dark.textSecondary} size={14} /> : <Eye color={colors.dark.textSecondary} size={14} />}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleCopy(streamingPassword || '', 'key')}>
+                  {copied === 'key' ? <Check color={colors.dark.success} size={14} /> : <Copy color={colors.dark.textSecondary} size={14} />}
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.savedCredentialHint}>Use at stream.uservault.de</Text>
+            </View>
+          )}
+        </>
       )}
 
       {streamMode === 'screen' && isLive && (
@@ -1397,5 +1505,101 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: '700' as const,
+  },
+  credentialsModalContent: {
+    backgroundColor: colors.dark.card,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 360,
+  },
+  credentialsBox: {
+    width: '100%',
+    backgroundColor: colors.dark.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  credentialsBoxItem: {
+    marginBottom: 12,
+  },
+  credentialLabelSmall: {
+    fontSize: 11,
+    color: colors.dark.textSecondary,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  credentialValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  credentialValueSmall: {
+    fontSize: 14,
+    color: colors.dark.text,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    flex: 1,
+  },
+  credentialsCloseButton: {
+    backgroundColor: colors.dark.accent,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 24,
+    width: '100%',
+    alignItems: 'center',
+  },
+  credentialsCloseText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  savedCredentialsCard: {
+    position: 'absolute',
+    bottom: 24,
+    left: 24,
+    right: 24,
+    backgroundColor: colors.dark.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.dark.border,
+  },
+  savedCredentialsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  savedCredentialsTitle: {
+    fontSize: 15,
+    fontWeight: '600' as const,
+    color: colors.dark.text,
+  },
+  savedCredentialItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  savedCredentialLabel: {
+    fontSize: 13,
+    color: colors.dark.textSecondary,
+    width: 70,
+  },
+  savedCredentialValue: {
+    fontSize: 13,
+    color: colors.dark.text,
+    flex: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  savedCredentialHint: {
+    fontSize: 11,
+    color: colors.dark.textSecondary,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
