@@ -326,6 +326,7 @@ export default function GoLiveScreen() {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [streamingToken, setStreamingToken] = useState<string | null>(null);
   const [hasStreamingAccount, setHasStreamingAccount] = useState<boolean | null>(null);
+  const [isCheckingAccount, setIsCheckingAccount] = useState(true);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [viewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -338,6 +339,7 @@ export default function GoLiveScreen() {
 
   useEffect(() => {
     const checkStreamingAccount = async () => {
+      setIsCheckingAccount(true);
       try {
         const [accountCreated, storedToken, storedEmail, storedPassword] = await Promise.all([
           AsyncStorage.getItem(STREAMING_ACCOUNT_KEY),
@@ -359,6 +361,8 @@ export default function GoLiveScreen() {
       } catch (error) {
         console.error('[GoLive] Error checking streaming account:', error);
         setHasStreamingAccount(false);
+      } finally {
+        setIsCheckingAccount(false);
       }
     };
     checkStreamingAccount();
@@ -366,14 +370,19 @@ export default function GoLiveScreen() {
 
   const createStreamingAccountMutation = useMutation({
     mutationFn: async () => {
+      console.log('[GoLive] Starting account creation, currentUser:', currentUser?.username);
+      
       if (!currentUser?.username) {
-        throw new Error('No user logged in');
+        throw new Error('No user logged in. Please login first.');
       }
       
       const email = `${currentUser.username}@uservault.stream`;
       const password = generatePassword();
       
       console.log('[GoLive] Creating streaming account for:', email);
+      console.log('[GoLive] With display_name:', currentUser.name || currentUser.username);
+      console.log('[GoLive] With bio:', currentUser.bio || '(empty)');
+      console.log('[GoLive] With avatar:', currentUser.avatar || '(none)');
       
       const response = await streamingService.mobileSignup({
         email,
@@ -384,28 +393,34 @@ export default function GoLiveScreen() {
         avatar_url: currentUser.avatar,
       });
       
+      console.log('[GoLive] Signup response:', JSON.stringify(response));
+      
       return { ...response, generatedEmail: email, generatedPassword: password };
     },
     onSuccess: async (data) => {
-      console.log('[GoLive] Streaming account created successfully');
-      await AsyncStorage.setItem(STREAMING_ACCOUNT_KEY, 'true');
-      if (data.access_token) {
-        await AsyncStorage.setItem(STREAMING_TOKEN_KEY, data.access_token);
-        setStreamingToken(data.access_token);
+      console.log('[GoLive] Streaming account created successfully:', JSON.stringify(data));
+      try {
+        await AsyncStorage.setItem(STREAMING_ACCOUNT_KEY, 'true');
+        if (data.access_token) {
+          await AsyncStorage.setItem(STREAMING_TOKEN_KEY, data.access_token);
+          setStreamingToken(data.access_token);
+        }
+        if (data.generatedEmail) {
+          await AsyncStorage.setItem(STREAMING_EMAIL_KEY, data.generatedEmail);
+          setStreamingEmail(data.generatedEmail);
+        }
+        if (data.generatedPassword) {
+          await AsyncStorage.setItem(STREAMING_PASSWORD_KEY, data.generatedPassword);
+          setStreamingPassword(data.generatedPassword);
+        }
+        setHasStreamingAccount(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        queryClient.invalidateQueries({ queryKey: ['mobile-stream-config'] });
+        setShowCredentialsModal(true);
+      } catch (storageError) {
+        console.error('[GoLive] Error saving to storage:', storageError);
       }
-      if (data.generatedEmail) {
-        await AsyncStorage.setItem(STREAMING_EMAIL_KEY, data.generatedEmail);
-        setStreamingEmail(data.generatedEmail);
-      }
-      if (data.generatedPassword) {
-        await AsyncStorage.setItem(STREAMING_PASSWORD_KEY, data.generatedPassword);
-        setStreamingPassword(data.generatedPassword);
-      }
-      setHasStreamingAccount(true);
       setIsCreatingAccount(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      queryClient.invalidateQueries({ queryKey: ['mobile-stream-config'] });
-      setShowCredentialsModal(true);
     },
     onError: (error) => {
       console.error('[GoLive] Failed to create streaming account:', error);
@@ -477,17 +492,27 @@ export default function GoLiveScreen() {
   const { mutateAsync: createStreamingAccountAsync } = createStreamingAccountMutation;
 
   const handleSelectMode = useCallback(async (mode: StreamMode) => {
+    console.log('[GoLive] handleSelectMode called, mode:', mode, 'hasStreamingAccount:', hasStreamingAccount);
+    
+    if (isCheckingAccount) {
+      console.log('[GoLive] Still checking account status, please wait');
+      return;
+    }
+    
     if (!hasStreamingAccount) {
+      console.log('[GoLive] No streaming account, creating one...');
       setIsCreatingAccount(true);
       try {
         await createStreamingAccountAsync();
-      } catch {
+        console.log('[GoLive] Account created successfully, proceeding to stream setup');
+      } catch (error) {
+        console.error('[GoLive] Account creation failed:', error);
         return;
       }
     }
     setStreamMode(mode);
     setShowSetupModal(true);
-  }, [hasStreamingAccount, createStreamingAccountAsync]);
+  }, [hasStreamingAccount, isCheckingAccount, createStreamingAccountAsync]);
 
   const { mutate: goLive } = goLiveMutation;
 
@@ -557,7 +582,7 @@ export default function GoLiveScreen() {
 
   return (
     <View style={styles.container}>
-      <Modal visible={isCreatingAccount} transparent animationType="fade">
+      <Modal visible={isCreatingAccount || createStreamingAccountMutation.isPending} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconContainer}>
@@ -568,6 +593,7 @@ export default function GoLiveScreen() {
               Please wait while your streaming account is being created...
             </Text>
             <ActivityIndicator size="large" color={colors.dark.accent} style={styles.modalLoader} />
+            <Text style={styles.modalSubtext}>This may take a few seconds</Text>
           </View>
         </View>
       </Modal>
@@ -826,7 +852,7 @@ export default function GoLiveScreen() {
         }}
       />
 
-      {streamMode === 'select' && (
+      {streamMode === 'select' && !isCheckingAccount && (
         <>
           <StreamTypeSelector onSelect={handleSelectMode} />
           {hasStreamingAccount && streamingEmail && (
@@ -912,6 +938,13 @@ export default function GoLiveScreen() {
           </View>
         </View>
       </Modal>
+
+      {isCheckingAccount && streamMode === 'select' && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.dark.accent} />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      )}
 
       {streamMode === 'screen' && isLive && (
         <View style={styles.screenLiveContainer}>
@@ -1082,6 +1115,12 @@ const styles = StyleSheet.create({
   },
   modalLoader: {
     marginTop: 16,
+  },
+  modalSubtext: {
+    fontSize: 12,
+    color: colors.dark.textSecondary,
+    marginTop: 12,
+    textAlign: 'center',
   },
   setupModalContainer: {
     flex: 1,
@@ -1662,5 +1701,15 @@ const styles = StyleSheet.create({
     color: colors.dark.textSecondary,
     marginTop: 8,
     textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: colors.dark.textSecondary,
   },
 });
