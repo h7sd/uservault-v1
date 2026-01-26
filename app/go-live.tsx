@@ -16,7 +16,6 @@ import {
   Copy,
   Eye,
   EyeOff,
-  Zap,
   X,
   Check,
   Info,
@@ -29,7 +28,7 @@ import * as Haptics from 'expo-haptics';
 
 import colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
-import streamingService from '@/services/streaming';
+import { streamingService } from '@/services/streaming';
 
 const CATEGORIES = [
   'Just Chatting',
@@ -60,9 +59,8 @@ export default function GoLiveScreen() {
   const {
     data: mobileConfig,
     isLoading: loadingConfig,
-    refetch: refetchConfig,
   } = useQuery({
-    queryKey: ['mobile-stream-config'],
+    queryKey: ['mobile-stream-config', authToken],
     queryFn: () => streamingService.getMobileConfig(authToken!),
     enabled: !!authToken,
   });
@@ -108,13 +106,17 @@ export default function GoLiveScreen() {
     setTimeout(() => setCopied(null), 2000);
   }, []);
 
+  const { mutate: goLive } = goLiveMutation;
+
   const handleGoLive = useCallback(() => {
     if (!title.trim()) {
       Alert.alert('Title Required', 'Please enter a title for your stream');
       return;
     }
-    goLiveMutation.mutate();
-  }, [title, goLiveMutation]);
+    goLive();
+  }, [title, goLive]);
+
+  const { mutate: endStream } = endStreamMutation;
 
   const handleEndStream = useCallback(() => {
     Alert.alert(
@@ -125,11 +127,11 @@ export default function GoLiveScreen() {
         {
           text: 'End Stream',
           style: 'destructive',
-          onPress: () => endStreamMutation.mutate(),
+          onPress: () => endStream(),
         },
       ]
     );
-  }, [endStreamMutation]);
+  }, [endStream]);
 
   return (
     <View style={styles.container}>
