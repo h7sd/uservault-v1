@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,15 +13,15 @@ import {
 import { useRouter, Stack } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Radio,
   Copy,
-  RefreshCw,
   Eye,
   EyeOff,
   Zap,
   X,
   Check,
   Info,
+  Video,
+  StopCircle,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -53,82 +53,83 @@ export default function GoLiveScreen() {
   const [description, setDescription] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Just Chatting');
   const [showStreamKey, setShowStreamKey] = useState(false);
-  const [copied, setCopied] = useState<'rtmp' | 'key' | null>(null);
+  const [copied, setCopied] = useState<'rtmp' | 'key' | 'full' | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [liveRtmpUrl, setLiveRtmpUrl] = useState<string | null>(null);
 
   const {
-    data: streamInfo,
-    isLoading: loadingInfo,
-    refetch: refetchInfo,
+    data: mobileConfig,
+    isLoading: loadingConfig,
+    refetch: refetchConfig,
   } = useQuery({
-    queryKey: ['stream-info'],
-    queryFn: () => streamingService.getStreamInfo(authToken!),
+    queryKey: ['mobile-stream-config'],
+    queryFn: () => streamingService.getMobileConfig(authToken!),
     enabled: !!authToken,
   });
 
-  const regenerateKeyMutation = useMutation({
-    mutationFn: () => streamingService.regenerateStreamKey(authToken!),
-    onSuccess: () => {
-      refetchInfo();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Success', 'Stream key regenerated successfully');
-    },
-    onError: (error) => {
-      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to regenerate key');
-    },
-  });
-
-  const startStreamMutation = useMutation({
+  const goLiveMutation = useMutation({
     mutationFn: () =>
-      streamingService.startStream(authToken!, {
+      streamingService.mobileGoLive(authToken!, {
         title: title || `${currentUser?.username}'s Stream`,
         category: selectedCategory,
         description,
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['live-streams'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
-        'Stream Ready!',
-        'Your stream is now prepared. Start streaming from your broadcast software (OBS, Larix Broadcaster, etc.) using the RTMP URL and Stream Key shown above.',
-        [{ text: 'Got it', onPress: () => router.back() }]
-      );
+      setIsLive(true);
+      setLiveRtmpUrl(data.rtmp_full);
+      console.log('[GoLive] Stream started successfully:', data);
     },
     onError: (error) => {
+      console.log('[GoLive] Error starting stream:', error);
       Alert.alert('Error', error instanceof Error ? error.message : 'Failed to start stream');
     },
   });
 
-  const handleCopy = useCallback(async (text: string, type: 'rtmp' | 'key') => {
+  const endStreamMutation = useMutation({
+    mutationFn: () => streamingService.mobileEndStream(authToken!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['live-streams'] });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setIsLive(false);
+      setLiveRtmpUrl(null);
+      Alert.alert('Stream Ended', 'Your stream has been ended successfully.');
+    },
+    onError: (error) => {
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to end stream');
+    },
+  });
+
+  const handleCopy = useCallback(async (text: string, type: 'rtmp' | 'key' | 'full') => {
     await Clipboard.setStringAsync(text);
     setCopied(type);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setTimeout(() => setCopied(null), 2000);
   }, []);
 
-  const handleRegenerateKey = useCallback(() => {
-    Alert.alert(
-      'Regenerate Stream Key?',
-      'This will invalidate your current stream key. Any active streams will be disconnected.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Regenerate',
-          style: 'destructive',
-          onPress: () => regenerateKeyMutation.mutate(),
-        },
-      ]
-    );
-  }, [regenerateKeyMutation]);
-
   const handleGoLive = useCallback(() => {
     if (!title.trim()) {
       Alert.alert('Title Required', 'Please enter a title for your stream');
       return;
     }
-    startStreamMutation.mutate();
-  }, [title, startStreamMutation]);
+    goLiveMutation.mutate();
+  }, [title, goLiveMutation]);
 
-  const rtmpUrl = streamingService.getRtmpUrl();
+  const handleEndStream = useCallback(() => {
+    Alert.alert(
+      'End Stream?',
+      'Are you sure you want to end your live stream?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'End Stream',
+          style: 'destructive',
+          onPress: () => endStreamMutation.mutate(),
+        },
+      ]
+    );
+  }, [endStreamMutation]);
 
   return (
     <View style={styles.container}>
@@ -151,16 +152,63 @@ export default function GoLiveScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
       >
+        {isLive && (
+          <View style={styles.liveIndicator}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveText}>LIVE</Text>
+          </View>
+        )}
+
         <View style={styles.infoCard}>
           <View style={styles.infoHeader}>
             <Info color={colors.dark.accent} size={20} />
-            <Text style={styles.infoTitle}>How to Stream</Text>
+            <Text style={styles.infoTitle}>{isLive ? 'You are Live!' : 'How to Stream'}</Text>
           </View>
           <Text style={styles.infoText}>
-            Use a streaming app like OBS Studio, Streamlabs, or Larix Broadcaster on your device.
-            Enter the RTMP URL and Stream Key below to start broadcasting.
+            {isLive
+              ? 'Your stream is now live! Use the RTMP URL below in your streaming app (OBS, Larix Broadcaster, etc.) to broadcast.'
+              : 'Enter your stream details and tap "Go Live" to prepare your stream. Then use the RTMP URL in your broadcasting app.'}
           </Text>
         </View>
+
+        {isLive && liveRtmpUrl && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Stream URL (Full)</Text>
+            <View style={styles.credentialCard}>
+              <Text style={styles.credentialLabel}>RTMP URL WITH KEY</Text>
+              <View style={styles.credentialRow}>
+                <Text style={styles.credentialValue} numberOfLines={1}>
+                  {showStreamKey ? liveRtmpUrl : liveRtmpUrl.replace(/\/[^/]+$/, '/••••••••••')}
+                </Text>
+                <View style={styles.keyActions}>
+                  <TouchableOpacity
+                    style={styles.eyeButton}
+                    onPress={() => setShowStreamKey(!showStreamKey)}
+                  >
+                    {showStreamKey ? (
+                      <EyeOff color={colors.dark.textSecondary} size={18} />
+                    ) : (
+                      <Eye color={colors.dark.textSecondary} size={18} />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.copyButton}
+                    onPress={() => handleCopy(liveRtmpUrl, 'full')}
+                  >
+                    {copied === 'full' ? (
+                      <Check color={colors.dark.success} size={18} />
+                    ) : (
+                      <Copy color={colors.dark.accent} size={18} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={styles.keyWarning}>
+                This URL contains your stream key. Keep it private!
+              </Text>
+            </View>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Stream Credentials</Text>
@@ -168,12 +216,16 @@ export default function GoLiveScreen() {
           <View style={styles.credentialCard}>
             <Text style={styles.credentialLabel}>RTMP URL</Text>
             <View style={styles.credentialRow}>
-              <Text style={styles.credentialValue} numberOfLines={1}>
-                {rtmpUrl}
-              </Text>
+              {loadingConfig ? (
+                <ActivityIndicator size="small" color={colors.dark.textSecondary} />
+              ) : (
+                <Text style={styles.credentialValue} numberOfLines={1}>
+                  {mobileConfig?.rtmp_url || 'rtmp://stream.uservault.de/live'}
+                </Text>
+              )}
               <TouchableOpacity
                 style={styles.copyButton}
-                onPress={() => handleCopy(rtmpUrl, 'rtmp')}
+                onPress={() => handleCopy(mobileConfig?.rtmp_url || 'rtmp://stream.uservault.de/live', 'rtmp')}
               >
                 {copied === 'rtmp' ? (
                   <Check color={colors.dark.success} size={18} />
@@ -185,30 +237,14 @@ export default function GoLiveScreen() {
           </View>
 
           <View style={styles.credentialCard}>
-            <View style={styles.credentialLabelRow}>
-              <Text style={styles.credentialLabel}>Stream Key</Text>
-              <TouchableOpacity
-                style={styles.regenerateButton}
-                onPress={handleRegenerateKey}
-                disabled={regenerateKeyMutation.isPending}
-              >
-                {regenerateKeyMutation.isPending ? (
-                  <ActivityIndicator size="small" color={colors.dark.accent} />
-                ) : (
-                  <>
-                    <RefreshCw color={colors.dark.accent} size={14} />
-                    <Text style={styles.regenerateText}>Regenerate</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.credentialLabel}>Stream Key</Text>
             <View style={styles.credentialRow}>
-              {loadingInfo ? (
+              {loadingConfig ? (
                 <ActivityIndicator size="small" color={colors.dark.textSecondary} />
               ) : (
                 <Text style={styles.credentialValue} numberOfLines={1}>
                   {showStreamKey
-                    ? streamInfo?.stream_key || 'Loading...'
+                    ? mobileConfig?.stream_key || 'Loading...'
                     : '••••••••••••••••••••'}
                 </Text>
               )}
@@ -225,8 +261,8 @@ export default function GoLiveScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.copyButton}
-                  onPress={() => handleCopy(streamInfo?.stream_key || '', 'key')}
-                  disabled={!streamInfo?.stream_key}
+                  onPress={() => handleCopy(mobileConfig?.stream_key || '', 'key')}
+                  disabled={!mobileConfig?.stream_key}
                 >
                   {copied === 'key' ? (
                     <Check color={colors.dark.success} size={18} />
@@ -303,20 +339,37 @@ export default function GoLiveScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        <TouchableOpacity
-          style={[styles.goLiveButton, startStreamMutation.isPending && styles.buttonDisabled]}
-          onPress={handleGoLive}
-          disabled={startStreamMutation.isPending}
-        >
-          {startStreamMutation.isPending ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <>
-              <Zap color="#FFF" size={22} />
-              <Text style={styles.goLiveButtonText}>Prepare Stream</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {isLive ? (
+          <TouchableOpacity
+            style={[styles.endStreamButton, endStreamMutation.isPending && styles.buttonDisabled]}
+            onPress={handleEndStream}
+            disabled={endStreamMutation.isPending}
+          >
+            {endStreamMutation.isPending ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <>
+                <StopCircle color="#FFF" size={22} />
+                <Text style={styles.goLiveButtonText}>End Stream</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.goLiveButton, goLiveMutation.isPending && styles.buttonDisabled]}
+            onPress={handleGoLive}
+            disabled={goLiveMutation.isPending}
+          >
+            {goLiveMutation.isPending ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <>
+                <Video color="#FFF" size={22} />
+                <Text style={styles.goLiveButtonText}>Go Live</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -496,6 +549,15 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 14,
   },
+  endStreamButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#424242',
+    paddingVertical: 16,
+    borderRadius: 14,
+  },
   buttonDisabled: {
     opacity: 0.6,
   },
@@ -503,5 +565,29 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: '700' as const,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#E53935',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 24,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  liveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#FFF',
+  },
+  liveText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '800' as const,
+    letterSpacing: 1,
   },
 });

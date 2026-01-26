@@ -31,6 +31,22 @@ export interface LiveStream {
   avatar_url?: string;
 }
 
+export interface MobileStreamConfig {
+  rtmp_url: string;
+  rtmp_full: string;
+  whip_url: string;
+  stream_key: string;
+  hls_url: string;
+}
+
+export interface MobileGoLiveResponse {
+  success: boolean;
+  rtmp_full: string;
+  stream_key: string;
+  stream_id?: string;
+  message?: string;
+}
+
 class StreamingService {
   private async request<T>(
     endpoint: string,
@@ -113,6 +129,35 @@ class StreamingService {
     console.log('[Streaming] Stopping stream');
     return this.request<{ success: boolean }>(
       '/stop',
+      { method: 'POST' },
+      authToken
+    );
+  }
+
+  async getMobileConfig(authToken: string): Promise<MobileStreamConfig> {
+    console.log('[Streaming] Getting mobile config');
+    return this.request<MobileStreamConfig>('/mobile-config', { method: 'GET' }, authToken);
+  }
+
+  async mobileGoLive(
+    authToken: string,
+    data: { title: string; category?: string; description?: string }
+  ): Promise<MobileGoLiveResponse> {
+    console.log('[Streaming] Mobile go live:', data.title);
+    return this.request<MobileGoLiveResponse>(
+      '/mobile-go-live',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+      authToken
+    );
+  }
+
+  async mobileEndStream(authToken: string): Promise<{ success: boolean }> {
+    console.log('[Streaming] Mobile end stream');
+    return this.request<{ success: boolean }>(
+      '/mobile-end-stream',
       { method: 'POST' },
       authToken
     );
