@@ -47,6 +47,45 @@ export interface MobileGoLiveResponse {
   message?: string;
 }
 
+export interface MobileSignupRequest {
+  email: string;
+  password: string;
+  username: string;
+  display_name?: string;
+  bio?: string;
+  avatar_url?: string;
+}
+
+export interface MobileSignupResponse {
+  success: boolean;
+  access_token: string;
+  user: {
+    username: string;
+    display_name: string;
+    bio: string;
+  };
+  streaming: {
+    rtmp_full: string;
+    stream_key: string;
+  };
+}
+
+export interface MobileUpdateProfileRequest {
+  display_name?: string;
+  bio?: string;
+  avatar_url?: string;
+}
+
+export interface MobileUpdateProfileResponse {
+  success: boolean;
+  user: {
+    username: string;
+    display_name: string;
+    bio: string;
+    avatar_url?: string;
+  };
+}
+
 class StreamingService {
   private async request<T>(
     endpoint: string,
@@ -218,6 +257,32 @@ class StreamingService {
         method: 'POST',
         body: JSON.stringify({ stream_key: streamKey }),
       }
+    );
+  }
+
+  async mobileSignup(data: MobileSignupRequest): Promise<MobileSignupResponse> {
+    console.log('[Streaming] Mobile signup for:', data.email);
+    return this.request<MobileSignupResponse>(
+      '/mobile-signup',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async mobileUpdateProfile(
+    authToken: string,
+    data: MobileUpdateProfileRequest
+  ): Promise<MobileUpdateProfileResponse> {
+    console.log('[Streaming] Mobile update profile');
+    return this.request<MobileUpdateProfileResponse>(
+      '/mobile-update-profile',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+      authToken
     );
   }
 

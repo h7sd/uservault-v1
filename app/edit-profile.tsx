@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/services/api';
+import streamingService from '@/services/streaming';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -41,6 +42,9 @@ export default function EditProfileScreen() {
     setIsSaving(true);
     try {
       console.log('[EditProfile] Updating profile...');
+      
+      const displayName = `${firstName.trim()} ${lastName.trim()}`.trim();
+      
       await api.put('/settings/account/update', {
         first_name: firstName.trim(),
         last_name: lastName.trim(),
@@ -51,11 +55,25 @@ export default function EditProfileScreen() {
         caption: bio.trim().slice(0, 100),
       });
 
+      const authToken = api.getAuthToken();
+      if (authToken) {
+        try {
+          console.log('[EditProfile] Also updating streaming profile...');
+          await streamingService.mobileUpdateProfile(authToken, {
+            display_name: displayName,
+            bio: bio.trim(),
+          });
+          console.log('[EditProfile] Streaming profile updated');
+        } catch (streamError) {
+          console.log('[EditProfile] Streaming profile update skipped:', streamError);
+        }
+      }
+
       console.log('[EditProfile] Profile updated successfully');
       
       updateUser({
         ...currentUser,
-        name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        name: displayName,
         username: username.trim(),
         bio: bio.trim(),
         website: website.trim(),

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import api from '@/services/api';
+import streamingService from '@/services/streaming';
 import type { User } from '@/types';
 
 const CURRENT_USER_KEY = 'uservault_current_user';
@@ -358,6 +359,69 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  const mobileSignup = useCallback(async (data: {
+    email: string;
+    password: string;
+    username: string;
+    display_name?: string;
+    bio?: string;
+  }) => {
+    try {
+      console.log('[Auth] Mobile signup for:', data.email);
+      
+      const response = await streamingService.mobileSignup({
+        email: data.email,
+        password: data.password,
+        username: data.username,
+        display_name: data.display_name,
+        bio: data.bio,
+      });
+      
+      if (!response.success || !response.access_token) {
+        return { success: false, error: 'Signup failed - no token received' };
+      }
+
+      console.log('[Auth] Mobile signup successful, storing token...');
+      await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.access_token);
+      setAuthToken(response.access_token);
+      api.setAuthToken(response.access_token);
+
+      const username = response.user?.username || data.username;
+      api.setUsername(username);
+      await AsyncStorage.setItem(USERNAME_KEY, username);
+      setStoredUsername(username);
+
+      const user: User = {
+        id: Date.now(),
+        username: username,
+        name: response.user?.display_name || data.display_name || data.username,
+        email: data.email,
+        bio: response.user?.bio || data.bio,
+        type: 'reader',
+        followers_count: 0,
+        following_count: 0,
+        posts_count: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      setCurrentUser(user);
+      await AsyncStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+      
+      console.log('[Auth] Mobile signup complete, user:', username);
+      return { 
+        success: true, 
+        user,
+        streaming: response.streaming,
+      };
+    } catch (error) {
+      console.error('[Auth] Mobile signup error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Signup failed',
+      };
+    }
+  }, []);
+
   const registerVerify = useCallback(async (data: {
     token: string;
     username: string;
@@ -692,6 +756,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     login,
     registerSendCode,
     registerVerify,
+    mobileSignup,
     forgotPassword,
     resetPassword,
     logout,
