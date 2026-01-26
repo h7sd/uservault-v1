@@ -8,15 +8,46 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Radio, Users, Play, Zap } from 'lucide-react-native';
+import { Radio, Users, Zap, Copy, Check, X, Eye, EyeOff } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 
 import colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import streamingService, { LiveStream } from '@/services/streaming';
+
+const STREAMING_ACCOUNT_KEY = 'streaming_account_credentials';
+
+interface StreamingCredentials {
+  email: string;
+  password: string;
+  username: string;
+  streamKey?: string;
+  rtmpUrl?: string;
+  createdAt: string;
+}
+
+function generatePassword(): string {
+  const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const numbers = '0123456789';
+  const special = '!@#$%&*';
+  
+  let password = '';
+  for (let i = 0; i < 5; i++) {
+    password += letters.charAt(Math.floor(Math.random() * letters.length));
+  }
+  for (let i = 0; i < 3; i++) {
+    password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+  }
+  password += special.charAt(Math.floor(Math.random() * special.length));
+  
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+}
 
 function LiveStreamCard({ stream, onPress }: { stream: LiveStream; onPress: () => void }) {
   const timeAgo = useCallback((dateString: string) => {
@@ -93,17 +124,167 @@ function EmptyState({ onGoLive }: { onGoLive: () => void }) {
   );
 }
 
+function CredentialsModal({ 
+  visible, 
+  credentials, 
+  onClose 
+}: { 
+  visible: boolean; 
+  credentials: StreamingCredentials | null;
+  onClose: () => void;
+}) {
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  const copyToClipboard = async (text: string, field: string) => {
+    await Clipboard.setStringAsync(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  if (!credentials) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Streaming Account Created!</Text>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <X color={colors.dark.textSecondary} size={24} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.modalSubtitle}>
+            Save these credentials to login on uservault.net
+          </Text>
+
+          <View style={styles.credentialCard}>
+            <Text style={styles.credentialLabel}>Email</Text>
+            <View style={styles.credentialRow}>
+              <Text style={styles.credentialValue}>{credentials.email}</Text>
+              <TouchableOpacity 
+                onPress={() => copyToClipboard(credentials.email, 'email')}
+                style={styles.copyButton}
+              >
+                {copiedField === 'email' ? (
+                  <Check color="#4CAF50" size={20} />
+                ) : (
+                  <Copy color={colors.dark.accent} size={20} />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.credentialCard}>
+            <Text style={styles.credentialLabel}>Password</Text>
+            <View style={styles.credentialRow}>
+              <Text style={styles.credentialValue}>
+                {showPassword ? credentials.password : '•'.repeat(credentials.password.length)}
+              </Text>
+              <View style={styles.passwordActions}>
+                <TouchableOpacity 
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.copyButton}
+                >
+                  {showPassword ? (
+                    <EyeOff color={colors.dark.textSecondary} size={20} />
+                  ) : (
+                    <Eye color={colors.dark.textSecondary} size={20} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => copyToClipboard(credentials.password, 'password')}
+                  style={styles.copyButton}
+                >
+                  {copiedField === 'password' ? (
+                    <Check color="#4CAF50" size={20} />
+                  ) : (
+                    <Copy color={colors.dark.accent} size={20} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.credentialCard}>
+            <Text style={styles.credentialLabel}>Username</Text>
+            <View style={styles.credentialRow}>
+              <Text style={styles.credentialValue}>{credentials.username}</Text>
+              <TouchableOpacity 
+                onPress={() => copyToClipboard(credentials.username, 'username')}
+                style={styles.copyButton}
+              >
+                {copiedField === 'username' ? (
+                  <Check color="#4CAF50" size={20} />
+                ) : (
+                  <Copy color={colors.dark.accent} size={20} />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {credentials.streamKey && (
+            <View style={styles.credentialCard}>
+              <Text style={styles.credentialLabel}>Stream Key</Text>
+              <View style={styles.credentialRow}>
+                <Text style={styles.credentialValue} numberOfLines={1}>
+                  {credentials.streamKey.slice(0, 20)}...
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => copyToClipboard(credentials.streamKey || '', 'streamKey')}
+                  style={styles.copyButton}
+                >
+                  {copiedField === 'streamKey' ? (
+                    <Check color="#4CAF50" size={20} />
+                  ) : (
+                    <Copy color={colors.dark.accent} size={20} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.doneButton} onPress={onClose}>
+            <Text style={styles.doneButtonText}>Got it!</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function LoadingOverlay({ message }: { message: string }) {
+  return (
+    <View style={styles.loadingOverlay}>
+      <View style={styles.loadingCard}>
+        <ActivityIndicator size="large" color={colors.dark.accent} />
+        <Text style={styles.loadingText}>{message}</Text>
+      </View>
+    </View>
+  );
+}
+
 export default function LiveScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, currentUser } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [credentials, setCredentials] = useState<StreamingCredentials | null>(null);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [hasCheckedAccount, setHasCheckedAccount] = useState(false);
 
   const {
     data: streams = [],
     isLoading,
     refetch,
-    error,
   } = useQuery({
     queryKey: ['live-streams'],
     queryFn: async () => {
@@ -116,11 +297,74 @@ export default function LiveScreen() {
     retry: 2,
   });
 
-  useEffect(() => {
-    if (error) {
-      console.error('[LiveScreen] Query error:', error);
+  const checkAndCreateStreamingAccount = useCallback(async () => {
+    if (!isAuthenticated || !currentUser || hasCheckedAccount) {
+      console.log('[LiveScreen] Skipping account check - not authenticated or already checked');
+      return;
     }
-  }, [error]);
+
+    console.log('[LiveScreen] Checking for existing streaming account...');
+    setHasCheckedAccount(true);
+
+    try {
+      const storedCredentials = await AsyncStorage.getItem(STREAMING_ACCOUNT_KEY);
+      
+      if (storedCredentials) {
+        const parsed = JSON.parse(storedCredentials) as StreamingCredentials;
+        console.log('[LiveScreen] Found existing streaming account:', parsed.email);
+        setCredentials(parsed);
+        return;
+      }
+
+      console.log('[LiveScreen] No streaming account found, creating one...');
+      setIsCreatingAccount(true);
+
+      const username = currentUser.username || `user_${currentUser.id}`;
+      const email = `${username}@uservault.stream`;
+      const password = generatePassword();
+      const displayName = currentUser.name || currentUser.username || 'Streamer';
+      const bio = currentUser.bio || '';
+      const avatarUrl = currentUser.avatar || '';
+
+      console.log('[LiveScreen] Creating account with:', { email, username, displayName });
+
+      const response = await streamingService.mobileSignup({
+        email,
+        password,
+        username,
+        display_name: displayName,
+        bio,
+        avatar_url: avatarUrl,
+      });
+
+      console.log('[LiveScreen] Account created successfully:', response);
+
+      const newCredentials: StreamingCredentials = {
+        email,
+        password,
+        username,
+        streamKey: response.streaming?.stream_key,
+        rtmpUrl: response.streaming?.rtmp_full,
+        createdAt: new Date().toISOString(),
+      };
+
+      await AsyncStorage.setItem(STREAMING_ACCOUNT_KEY, JSON.stringify(newCredentials));
+      setCredentials(newCredentials);
+      setShowCredentialsModal(true);
+
+      console.log('[LiveScreen] Credentials stored and modal shown');
+    } catch (error) {
+      console.error('[LiveScreen] Error creating streaming account:', error);
+    } finally {
+      setIsCreatingAccount(false);
+    }
+  }, [isAuthenticated, currentUser, hasCheckedAccount]);
+
+  useEffect(() => {
+    if (isAuthenticated && currentUser && !hasCheckedAccount) {
+      checkAndCreateStreamingAccount();
+    }
+  }, [isAuthenticated, currentUser, hasCheckedAccount, checkAndCreateStreamingAccount]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -146,6 +390,12 @@ export default function LiveScreen() {
     [router]
   );
 
+  const handleShowCredentials = useCallback(() => {
+    if (credentials) {
+      setShowCredentialsModal(true);
+    }
+  }, [credentials]);
+
   const renderStream = useCallback(
     ({ item }: { item: LiveStream }) => (
       <LiveStreamCard stream={item} onPress={() => handleWatchStream(item)} />
@@ -155,15 +405,35 @@ export default function LiveScreen() {
 
   return (
     <View style={styles.container}>
+      {isCreatingAccount && (
+        <LoadingOverlay message="Please wait, your account is being created..." />
+      )}
+
+      <CredentialsModal
+        visible={showCredentialsModal}
+        credentials={credentials}
+        onClose={() => setShowCredentialsModal(false)}
+      />
+
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.headerLeft}>
           <Radio color={colors.dark.accent} size={24} />
           <Text style={styles.headerTitle}>Live</Text>
         </View>
-        <TouchableOpacity style={styles.goLiveHeaderButton} onPress={handleGoLive}>
-          <Zap color="#FFF" size={16} />
-          <Text style={styles.goLiveHeaderText}>Go Live</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {credentials && (
+            <TouchableOpacity 
+              style={styles.credentialsButton} 
+              onPress={handleShowCredentials}
+            >
+              <Text style={styles.credentialsButtonText}>Login Info</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.goLiveHeaderButton} onPress={handleGoLive}>
+            <Zap color="#FFF" size={16} />
+            <Text style={styles.goLiveHeaderText}>Go Live</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {isLoading && !refreshing ? (
@@ -216,10 +486,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   headerTitle: {
     fontSize: 28,
     fontWeight: '700' as const,
     color: colors.dark.text,
+  },
+  credentialsButton: {
+    backgroundColor: colors.dark.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.dark.border,
+  },
+  credentialsButtonText: {
+    color: colors.dark.text,
+    fontSize: 12,
+    fontWeight: '600' as const,
   },
   goLiveHeaderButton: {
     flexDirection: 'row',
@@ -406,6 +694,102 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   goLiveButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '600' as const,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  loadingCard: {
+    backgroundColor: colors.dark.card,
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    gap: 16,
+    marginHorizontal: 40,
+  },
+  loadingText: {
+    color: colors.dark.text,
+    fontSize: 16,
+    fontWeight: '600' as const,
+    textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: colors.dark.card,
+    borderRadius: 24,
+    padding: 24,
+    marginHorizontal: 20,
+    width: '90%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '700' as const,
+    color: colors.dark.text,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.dark.textSecondary,
+    marginBottom: 24,
+  },
+  credentialCard: {
+    backgroundColor: colors.dark.surface,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  credentialLabel: {
+    fontSize: 12,
+    color: colors.dark.textSecondary,
+    marginBottom: 6,
+    fontWeight: '500' as const,
+  },
+  credentialRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  credentialValue: {
+    fontSize: 15,
+    color: colors.dark.text,
+    fontWeight: '600' as const,
+    flex: 1,
+  },
+  passwordActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  copyButton: {
+    padding: 4,
+  },
+  doneButton: {
+    backgroundColor: colors.dark.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  doneButtonText: {
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600' as const,
