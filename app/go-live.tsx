@@ -152,11 +152,24 @@ export default function GoLiveScreen() {
   const {
     data: mobileConfig,
     isLoading: loadingConfig,
+    error: configError,
   } = useQuery({
     queryKey: ['mobile-stream-config', effectiveToken],
-    queryFn: () => streamingService.getMobileConfig(effectiveToken!),
+    queryFn: async () => {
+      console.log('[GoLive] Fetching mobile config with token:', effectiveToken?.slice(0, 20) + '...');
+      const result = await streamingService.getMobileConfig(effectiveToken!);
+      console.log('[GoLive] Mobile config result:', result);
+      return result;
+    },
     enabled: !!effectiveToken && hasStreamingAccount === true,
+    retry: 1,
   });
+
+  useEffect(() => {
+    if (configError) {
+      console.error('[GoLive] Config error:', configError);
+    }
+  }, [configError]);
 
   const goLiveMutation = useMutation({
     mutationFn: () =>

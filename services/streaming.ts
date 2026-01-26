@@ -175,7 +175,18 @@ class StreamingService {
 
   async getMobileConfig(authToken: string): Promise<MobileStreamConfig> {
     console.log('[Streaming] Getting mobile config');
-    return this.request<MobileStreamConfig>('/mobile-config', { method: 'GET' }, authToken);
+    try {
+      return await this.request<MobileStreamConfig>('/mobile-config', { method: 'GET' }, authToken);
+    } catch (error) {
+      console.error('[Streaming] Error getting mobile config:', error);
+      return {
+        rtmp_url: 'rtmp://stream.uservault.de/live',
+        rtmp_full: '',
+        whip_url: '',
+        stream_key: '',
+        hls_url: '',
+      };
+    }
   }
 
   async mobileGoLive(
@@ -219,13 +230,25 @@ class StreamingService {
 
   async getLiveStreams(): Promise<LiveStream[]> {
     console.log('[Streaming] Getting live streams');
-    const response = await this.request<{ streams: LiveStream[] } | LiveStream[]>('/live', {
-      method: 'GET',
-    });
-    if (Array.isArray(response)) {
-      return response;
+    try {
+      const response = await this.request<{ streams: LiveStream[] } | LiveStream[] | { data: LiveStream[] }>('/live', {
+        method: 'GET',
+      });
+      console.log('[Streaming] Live streams response:', JSON.stringify(response));
+      if (Array.isArray(response)) {
+        return response;
+      }
+      if ('streams' in response && response.streams) {
+        return response.streams;
+      }
+      if ('data' in response && response.data) {
+        return response.data;
+      }
+      return [];
+    } catch (error) {
+      console.error('[Streaming] Error getting live streams:', error);
+      return [];
     }
-    return response.streams || [];
   }
 
   async getStream(params: { id?: string; username?: string }): Promise<LiveStream | null> {
@@ -287,7 +310,7 @@ class StreamingService {
   }
 
   getRtmpUrl(): string {
-    return 'rtmp://stream.uservault.net/live';
+    return 'rtmp://stream.uservault.de/live';
   }
 }
 

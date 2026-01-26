@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -103,11 +103,24 @@ export default function LiveScreen() {
     data: streams = [],
     isLoading,
     refetch,
+    error,
   } = useQuery({
     queryKey: ['live-streams'],
-    queryFn: () => streamingService.getLiveStreams(),
+    queryFn: async () => {
+      console.log('[LiveScreen] Fetching live streams...');
+      const result = await streamingService.getLiveStreams();
+      console.log('[LiveScreen] Got streams:', result?.length || 0);
+      return result;
+    },
     refetchInterval: 30000,
+    retry: 2,
   });
+
+  useEffect(() => {
+    if (error) {
+      console.error('[LiveScreen] Query error:', error);
+    }
+  }, [error]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
