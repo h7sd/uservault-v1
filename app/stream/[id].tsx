@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 12,
-    background: 'linear-gradient(180deg, rgba(0,0,0,0.6) 0%, transparent 100%)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   overlayBackButton: {
     width: 40,

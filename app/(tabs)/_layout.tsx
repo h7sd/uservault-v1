@@ -1,12 +1,37 @@
 import { Tabs, useRouter } from "expo-router";
 import { Home, Compass, Plus, MessageCircle, Image as ImageIcon, Video, X, Radio } from "lucide-react-native";
-import React, { useRef, useEffect, useState } from "react";
-import { View, StyleSheet, TouchableOpacity, Image, Animated, Modal, Text, Pressable } from "react-native";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import { View, StyleSheet, TouchableOpacity, Image, Animated, Modal, Text, Pressable, ActivityIndicator } from "react-native";
 import * as ImagePicker from 'expo-image-picker';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
 
 import colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { streamingService } from "@/services/streaming";
+
+const STREAMING_ACCOUNT_KEY = 'uservault_streaming_account_created';
+const STREAMING_TOKEN_KEY = 'uservault_streaming_token';
+const STREAMING_EMAIL_KEY = 'uservault_streaming_email';
+const STREAMING_PASSWORD_KEY = 'uservault_streaming_password';
+
+function generatePassword(): string {
+  const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const numbers = '0123456789';
+  const specials = '!@#$%&*';
+  
+  let password = '';
+  for (let i = 0; i < 4; i++) {
+    password += letters[Math.floor(Math.random() * letters.length)];
+  }
+  for (let i = 0; i < 3; i++) {
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+  }
+  password += specials[Math.floor(Math.random() * specials.length)];
+  password += letters[Math.floor(Math.random() * letters.length)];
+  
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+}
 
 function AnimatedTabIcon({ 
   IconComponent, 
@@ -108,9 +133,89 @@ function CreateButton({ onPress }: { onPress: () => void }) {
 
 export default function TabLayout() {
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthenticated } = useAuth();
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const slideAnim = useRef(new Animated.Value(300)).current;
+  const [isCreatingStreamAccount, setIsCreatingStreamAccount] = useState(false);
+  const [streamAccountCreated, setStreamAccountCreated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkStreamingAccount = async () => {
+      try {
+        const accountCreated = await AsyncStorage.getItem(STREAMING_ACCOUNT_KEY);
+        setStreamAccountCreated(accountCreated === 'true');
+        console.log('[TabLayout] Streaming account status:', accountCreated);
+      } catch (error) {
+        console.error('[TabLayout] Error checking streaming account:', error);
+        setStreamAccountCreated(false);
+      }
+    };
+    checkStreamingAccount();
+  }, []);
+
+  const createStreamingAccount = useCallback(async () => {
+    if (!currentUser?.username) {
+      console.log('[TabLayout] No user logged in');
+      router.push('/login');
+      return false;
+    }
+
+    setIsCreatingStreamAccount(true);
+    try {
+      const email = `${currentUser.username}@uservault.stream`;
+      const password = generatePassword();
+
+      console.log('[TabLayout] Creating streaming account for:', email);
+
+      const response = await streamingService.mobileSignup({
+        email,
+        password,
+        username: currentUser.username,
+        display_name: currentUser.name || currentUser.username,
+        bio: currentUser.bio || '',
+        avatar_url: currentUser.avatar,
+      });
+
+      console.log('[TabLayout] Signup response:', JSON.stringify(response));
+
+      await AsyncStorage.setItem(STREAMING_ACCOUNT_KEY, 'true');
+      if (response.access_token) {
+        await AsyncStorage.setItem(STREAMING_TOKEN_KEY, response.access_token);
+      }
+      await AsyncStorage.setItem(STREAMING_EMAIL_KEY, email);
+      await AsyncStorage.setItem(STREAMING_PASSWORD_KEY, password);
+
+      setStreamAccountCreated(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      console.log('[TabLayout] Streaming account created successfully');
+      return true;
+    } catch (error) {
+      console.error('[TabLayout] Failed to create streaming account:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return false;
+    } finally {
+      setIsCreatingStreamAccount(false);
+    }
+  }, [currentUser, router]);
+
+  const handleLiveTabPress = useCallback(async () => {
+    console.log('[TabLayout] Live tab pressed, isAuthenticated:', isAuthenticated, 'streamAccountCreated:', streamAccountCreated);
+    
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+
+    if (streamAccountCreated === false) {
+      console.log('[TabLayout] Creating streaming account...');
+      const success = await createStreamingAccount();
+      if (success) {
+        router.push('/go-live');
+      }
+    } else {
+      router.push('/go-live');
+    }
+  }, [isAuthenticated, streamAccountCreated, createStreamingAccount, router]);
 
   const openSheet = () => {
     setShowCreateSheet(true);
@@ -261,6 +366,12 @@ export default function TabLayout() {
             />
           ),
         }}
+        listeners={{
+          tabPress: (e) => {
+            e.preventDefault();
+            handleLiveTabPress();
+          },
+        }}
       />
       <Tabs.Screen
         name="messages"
@@ -294,6 +405,26 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+
+      <Modal
+        visible={isCreatingStreamAccount}
+        transparent
+        animationType="fade"
+      >
+        <View style={styles.streamAccountModalOverlay}>
+          <View style={styles.streamAccountModalContent}>
+            <View style={styles.streamAccountIconContainer}>
+              <Radio color={colors.dark.accent} size={48} />
+            </View>
+            <Text style={styles.streamAccountTitle}>Setting Up Your Stream</Text>
+            <Text style={styles.streamAccountText}>
+              Please wait while your streaming account is being created...
+            </Text>
+            <ActivityIndicator size="large" color={colors.dark.accent} style={styles.streamAccountLoader} />
+            <Text style={styles.streamAccountSubtext}>This may take a few seconds</Text>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showCreateSheet}
@@ -427,5 +558,51 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
+  },
+  streamAccountModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  streamAccountModalContent: {
+    backgroundColor: colors.dark.card,
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+  },
+  streamAccountIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.dark.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  streamAccountTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: colors.dark.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  streamAccountText: {
+    fontSize: 15,
+    color: colors.dark.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  streamAccountLoader: {
+    marginTop: 16,
+  },
+  streamAccountSubtext: {
+    fontSize: 12,
+    color: colors.dark.textSecondary,
+    marginTop: 12,
+    textAlign: 'center',
   },
 });
