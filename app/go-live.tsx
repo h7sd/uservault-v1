@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Modal,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,14 +22,38 @@ import {
   Info,
   Video,
   StopCircle,
+  Radio,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import colors from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { streamingService } from '@/services/streaming';
+
+const STREAMING_ACCOUNT_KEY = 'uservault_streaming_account_created';
+const STREAMING_TOKEN_KEY = 'uservault_streaming_token';
+
+function generatePassword(): string {
+  const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const numbers = '0123456789';
+  const specials = '!@#$%&*';
+  
+  let password = '';
+  
+  for (let i = 0; i < 4; i++) {
+    password += letters[Math.floor(Math.random() * letters.length)];
+  }
+  for (let i = 0; i < 3; i++) {
+    password += numbers[Math.floor(Math.random() * numbers.length)];
+  }
+  password += specials[Math.floor(Math.random() * specials.length)];
+  password += letters[Math.floor(Math.random() * letters.length)];
+  
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+}
 
 const CATEGORIES = [
   'Just Chatting',
@@ -55,19 +80,87 @@ export default function GoLiveScreen() {
   const [copied, setCopied] = useState<'rtmp' | 'key' | 'full' | null>(null);
   const [isLive, setIsLive] = useState(false);
   const [liveRtmpUrl, setLiveRtmpUrl] = useState<string | null>(null);
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [streamingToken, setStreamingToken] = useState<string | null>(null);
+  const [hasStreamingAccount, setHasStreamingAccount] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const checkStreamingAccount = async () => {
+      try {
+        const [accountCreated, storedToken] = await Promise.all([
+          AsyncStorage.getItem(STREAMING_ACCOUNT_KEY),
+          AsyncStorage.getItem(STREAMING_TOKEN_KEY),
+        ]);
+        setHasStreamingAccount(accountCreated === 'true');
+        if (storedToken) {
+          setStreamingToken(storedToken);
+        }
+        console.log('[GoLive] Streaming account status:', accountCreated, 'token:', !!storedToken);
+      } catch (error) {
+        console.error('[GoLive] Error checking streaming account:', error);
+        setHasStreamingAccount(false);
+      }
+    };
+    checkStreamingAccount();
+  }, []);
+
+  const createStreamingAccountMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentUser?.username) {
+        throw new Error('No user logged in');
+      }
+      
+      const email = `${currentUser.username}@uservault.stream`;
+      const password = generatePassword();
+      
+      console.log('[GoLive] Creating streaming account for:', email);
+      
+      const response = await streamingService.mobileSignup({
+        email,
+        password,
+        username: currentUser.username,
+        display_name: currentUser.name || currentUser.username,
+        bio: currentUser.bio || '',
+        avatar_url: currentUser.avatar,
+      });
+      
+      return response;
+    },
+    onSuccess: async (data) => {
+      console.log('[GoLive] Streaming account created successfully');
+      await AsyncStorage.setItem(STREAMING_ACCOUNT_KEY, 'true');
+      if (data.access_token) {
+        await AsyncStorage.setItem(STREAMING_TOKEN_KEY, data.access_token);
+        setStreamingToken(data.access_token);
+      }
+      setHasStreamingAccount(true);
+      setIsCreatingAccount(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      queryClient.invalidateQueries({ queryKey: ['mobile-stream-config'] });
+    },
+    onError: (error) => {
+      console.error('[GoLive] Failed to create streaming account:', error);
+      setIsCreatingAccount(false);
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to create streaming account');
+    },
+  });
+
+  const { mutateAsync: createStreamingAccount } = createStreamingAccountMutation;
+
+  const effectiveToken = streamingToken || authToken;
 
   const {
     data: mobileConfig,
     isLoading: loadingConfig,
   } = useQuery({
-    queryKey: ['mobile-stream-config', authToken],
-    queryFn: () => streamingService.getMobileConfig(authToken!),
-    enabled: !!authToken,
+    queryKey: ['mobile-stream-config', effectiveToken],
+    queryFn: () => streamingService.getMobileConfig(effectiveToken!),
+    enabled: !!effectiveToken && hasStreamingAccount === true,
   });
 
   const goLiveMutation = useMutation({
     mutationFn: () =>
-      streamingService.mobileGoLive(authToken!, {
+      streamingService.mobileGoLive(effectiveToken!, {
         title: title || `${currentUser?.username}'s Stream`,
         category: selectedCategory,
         description,
@@ -86,7 +179,7 @@ export default function GoLiveScreen() {
   });
 
   const endStreamMutation = useMutation({
-    mutationFn: () => streamingService.mobileEndStream(authToken!),
+    mutationFn: () => streamingService.mobileEndStream(effectiveToken!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['live-streams'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -108,13 +201,27 @@ export default function GoLiveScreen() {
 
   const { mutate: goLive } = goLiveMutation;
 
-  const handleGoLive = useCallback(() => {
+  const handleGoLive = useCallback(async () => {
     if (!title.trim()) {
       Alert.alert('Title Required', 'Please enter a title for your stream');
       return;
     }
+    
+    if (!hasStreamingAccount) {
+      setIsCreatingAccount(true);
+      try {
+        await createStreamingAccount();
+        setTimeout(() => {
+          goLive();
+        }, 500);
+      } catch {
+        // Error handled in mutation
+      }
+      return;
+    }
+    
     goLive();
-  }, [title, goLive]);
+  }, [title, goLive, hasStreamingAccount, createStreamingAccount]);
 
   const { mutate: endStream } = endStreamMutation;
 
@@ -135,6 +242,25 @@ export default function GoLiveScreen() {
 
   return (
     <View style={styles.container}>
+      <Modal
+        visible={isCreatingAccount}
+        transparent
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <Radio color={colors.dark.accent} size={48} />
+            </View>
+            <Text style={styles.modalTitle}>Setting Up Your Stream</Text>
+            <Text style={styles.modalText}>
+              Please wait while your streaming account is being created...
+            </Text>
+            <ActivityIndicator size="large" color={colors.dark.accent} style={styles.modalLoader} />
+          </View>
+        </View>
+      </Modal>
+
       <Stack.Screen
         options={{
           headerShown: true,
@@ -591,5 +717,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800' as const,
     letterSpacing: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.dark.card,
+    borderRadius: 24,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.dark.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700' as const,
+    color: colors.dark.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalText: {
+    fontSize: 15,
+    color: colors.dark.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  modalLoader: {
+    marginTop: 16,
   },
 });
