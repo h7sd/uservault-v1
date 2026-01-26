@@ -328,6 +328,7 @@ export default function GoLiveScreen() {
   const [hasStreamingAccount, setHasStreamingAccount] = useState<boolean | null>(null);
   const [isCheckingAccount, setIsCheckingAccount] = useState(true);
   const [showSetupModal, setShowSetupModal] = useState(false);
+  const [pendingStreamMode, setPendingStreamMode] = useState<StreamMode | null>(null);
   const [viewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', username: 'System', message: 'Welcome to the stream!', timestamp: new Date() },
@@ -417,6 +418,7 @@ export default function GoLiveScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         queryClient.invalidateQueries({ queryKey: ['mobile-stream-config'] });
         setShowCredentialsModal(true);
+        console.log('[GoLive] Showing credentials modal, pending mode:', pendingStreamMode);
       } catch (storageError) {
         console.error('[GoLive] Error saving to storage:', storageError);
       }
@@ -502,13 +504,16 @@ export default function GoLiveScreen() {
     if (!hasStreamingAccount) {
       console.log('[GoLive] No streaming account, creating one...');
       setIsCreatingAccount(true);
+      setPendingStreamMode(mode);
       try {
         await createStreamingAccountAsync();
-        console.log('[GoLive] Account created successfully, proceeding to stream setup');
+        console.log('[GoLive] Account created, will show credentials first');
       } catch (error) {
         console.error('[GoLive] Account creation failed:', error);
+        setPendingStreamMode(null);
         return;
       }
+      return;
     }
     setStreamMode(mode);
     setShowSetupModal(true);
@@ -646,7 +651,15 @@ export default function GoLiveScreen() {
             
             <TouchableOpacity
               style={styles.credentialsCloseButton}
-              onPress={() => setShowCredentialsModal(false)}
+              onPress={() => {
+                setShowCredentialsModal(false);
+                if (pendingStreamMode) {
+                  console.log('[GoLive] Credentials closed, proceeding with mode:', pendingStreamMode);
+                  setStreamMode(pendingStreamMode);
+                  setShowSetupModal(true);
+                  setPendingStreamMode(null);
+                }
+              }}
             >
               <Text style={styles.credentialsCloseText}>Got it!</Text>
             </TouchableOpacity>
