@@ -182,6 +182,19 @@ function RootLayoutNav() {
             headerShown: false,
           }} 
         />
+        <Stack.Screen 
+          name="go-live" 
+          options={{ 
+            presentation: "modal",
+            headerShown: false,
+          }} 
+        />
+        <Stack.Screen 
+          name="stream/[id]" 
+          options={{ 
+            headerShown: false,
+          }} 
+        />
       </Stack>
 
       <Modal

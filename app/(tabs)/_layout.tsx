@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from "expo-router";
-import { Home, Compass, Plus, MessageCircle, Image as ImageIcon, Video, X } from "lucide-react-native";
+import { Home, Compass, Plus, MessageCircle, Image as ImageIcon, Video, X, Radio } from "lucide-react-native";
 import React, { useRef, useEffect, useState } from "react";
 import { View, StyleSheet, TouchableOpacity, Image, Animated, Modal, Text, Pressable } from "react-native";
 import * as ImagePicker from 'expo-image-picker';
@@ -246,6 +246,20 @@ export default function TabLayout() {
             e.preventDefault();
             handleCreate();
           },
+        }}
+      />
+      <Tabs.Screen
+        name="live"
+        options={{
+          title: "Live",
+          tabBarIcon: ({ color, size, focused }) => (
+            <AnimatedTabIcon 
+              IconComponent={Radio} 
+              color={color} 
+              size={size} 
+              focused={focused} 
+            />
+          ),
         }}
       />
       <Tabs.Screen
