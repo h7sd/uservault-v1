@@ -334,6 +334,7 @@ export default function GoLiveScreen() {
   const [streamingEmail, setStreamingEmail] = useState<string | null>(null);
   const [streamingPassword, setStreamingPassword] = useState<string | null>(null);
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [showSavedCredentials, setShowSavedCredentials] = useState(false);
 
   useEffect(() => {
     const checkStreamingAccount = async () => {
@@ -817,6 +818,11 @@ export default function GoLiveScreen() {
               <X color={colors.dark.text} size={24} />
             </TouchableOpacity>
           ),
+          headerRight: () => hasStreamingAccount && streamingEmail ? (
+            <TouchableOpacity onPress={() => setShowSavedCredentials(true)} style={styles.headerButton}>
+              <Settings color={colors.dark.accent} size={22} />
+            </TouchableOpacity>
+          ) : null,
         }}
       />
 
@@ -851,6 +857,61 @@ export default function GoLiveScreen() {
           )}
         </>
       )}
+
+      <Modal visible={showSavedCredentials} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.credentialsModalContent}>
+            <View style={styles.modalIconContainer}>
+              <Settings color={colors.dark.accent} size={48} />
+            </View>
+            <Text style={styles.modalTitle}>Website Login</Text>
+            <Text style={styles.modalText}>
+              Use these credentials to login on stream.uservault.de
+            </Text>
+            
+            <View style={styles.credentialsBox}>
+              <View style={styles.credentialsBoxItem}>
+                <Text style={styles.credentialLabelSmall}>Email</Text>
+                <View style={styles.credentialValueRow}>
+                  <Text style={styles.credentialValueSmall} selectable>{streamingEmail || 'Not available'}</Text>
+                  {streamingEmail && (
+                    <TouchableOpacity onPress={() => handleCopy(streamingEmail, 'rtmp')}>
+                      {copied === 'rtmp' ? (
+                        <Check color={colors.dark.success} size={16} />
+                      ) : (
+                        <Copy color={colors.dark.accent} size={16} />
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+              
+              <View style={styles.credentialsBoxItem}>
+                <Text style={styles.credentialLabelSmall}>Password</Text>
+                <View style={styles.credentialValueRow}>
+                  <Text style={styles.credentialValueSmall} selectable>{streamingPassword || 'Not available'}</Text>
+                  {streamingPassword && (
+                    <TouchableOpacity onPress={() => handleCopy(streamingPassword, 'key')}>
+                      {copied === 'key' ? (
+                        <Check color={colors.dark.success} size={16} />
+                      ) : (
+                        <Copy color={colors.dark.accent} size={16} />
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+            
+            <TouchableOpacity
+              style={styles.credentialsCloseButton}
+              onPress={() => setShowSavedCredentials(false)}
+            >
+              <Text style={styles.credentialsCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {streamMode === 'screen' && isLive && (
         <View style={styles.screenLiveContainer}>
